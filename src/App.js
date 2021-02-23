@@ -1,25 +1,191 @@
-import logo from './logo.svg';
-import './App.css';
+import React, { useRef, useState } from 'react'
+import './App.css'
+import { DndProvider, useDrag, useDrop } from 'react-dnd'
+import { HTML5Backend } from 'react-dnd-html5-backend'
+import { TouchBackend } from 'react-dnd-touch-backend'
 
-function App() {
-  return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
-  );
+import { COLUMN_NAMES } from "./constants";
+import { tasks } from './tasks'
+
+const MovableItem = ({ name, setItems, index, moveCardHandler, currentColumnName}) => {
+
+	const ref = useRef(null)
+	
+	const [, drop] = useDrop(() => ({
+        accept: 'Our first type',
+        hover(item, monitor) {
+            if (!ref.current) {
+                return;
+            }
+            const dragIndex = item.index;
+            const hoverIndex = index;
+            
+            if (dragIndex === hoverIndex) {
+                return;
+            }
+            
+            const hoverBoundingRect = ref.current?.getBoundingClientRect();
+            
+            const hoverMiddleY = (hoverBoundingRect.bottom - hoverBoundingRect.top) / 2;
+            
+            const clientOffset = monitor.getClientOffset();
+            
+            const hoverClientY = clientOffset.y - hoverBoundingRect.top;
+
+            if (dragIndex < hoverIndex && hoverClientY < hoverMiddleY) {
+                return;
+            }
+            
+            if (dragIndex > hoverIndex && hoverClientY > hoverMiddleY) {
+                return;
+            }
+            
+            moveCardHandler(dragIndex, hoverIndex);
+
+            item.index = hoverIndex;
+        },
+    }), [index, moveCardHandler]);
+
+	const [{ isDragging }, drag] = useDrag(() => ({
+		item: { index, name, currentColumnName, type: 'Our first type'},
+		end: (item, monitor) => {
+			const dropResult = monitor.getDropResult()
+			if (dropResult){
+				const { name } = dropResult
+				const { DO_IT, IN_PROGRESS, AWAITING_REVIEW, DONE } = COLUMN_NAMES
+				switch (name) {
+					case DO_IT:
+						changeItemColumn(item, DO_IT)
+						break
+					case IN_PROGRESS:
+						changeItemColumn(item, IN_PROGRESS)
+						break
+					case AWAITING_REVIEW:
+						changeItemColumn(item, AWAITING_REVIEW)
+						break
+					case DONE:
+						changeItemColumn(item, DONE)
+						break
+					default:
+						break
+				}
+			}
+		},
+		collect: (monitor) => ({
+			isDragging: monitor.isDragging()
+		}),
+	}), [name, index])
+
+	const changeItemColumn = (currentItem, columnName) => {
+		setItems((prevState) => {
+			return prevState.map(e => {
+				return {
+					...e,
+					column: e.name === currentItem.name ? columnName: e.column,
+				}
+			})
+		})
+	}
+
+	const opacity = isDragging ? 0.4 : 1
+
+	drag(drop(ref))
+
+	return (
+		<div ref={ref} className="movable-item" style={{opacity}}>
+			{name}
+		</div>
+	)
 }
 
-export default App;
+const Column = ({ children, className, title }) => {
+	
+	const [{ isOver, canDrop }, drop] = useDrop(() => ({
+		accept: 'Our first type',
+		drop: () => ({ name: title }),
+		collect: (monitor) => ({
+            isOver: monitor.isOver(),
+            canDrop: monitor.canDrop(),
+        }),
+		canDrop: (item) => {
+			const { DO_IT, IN_PROGRESS, AWAITING_REVIEW, DONE } = COLUMN_NAMES
+			const { currentColumnName } = item
+			return (currentColumnName === title) || 
+			(currentColumnName === DO_IT && title === IN_PROGRESS) ||
+			(currentColumnName === IN_PROGRESS && (title === DO_IT || title === AWAITING_REVIEW)) ||
+			(currentColumnName === AWAITING_REVIEW && (title === IN_PROGRESS || title === DONE)) ||
+			(currentColumnName === DONE && (title === AWAITING_REVIEW))
+		}
+	}))
+
+	const getBackgroundColor = () => {
+		if (isOver) {
+			if (canDrop) return 'rgb(188, 251, 255)'
+			return 'rgb(255, 188, 188)'
+		}
+		return ''
+	}
+
+	return (
+		<div ref={drop} className={className} style={{backgroundColor: getBackgroundColor()}}>
+			{title}
+			{children}
+		</div>
+	)
+}
+
+export const App = () => {
+
+	const [items, setItems] = useState(tasks)
+	const isMobile = window.innerWidth < 600
+
+	const { DO_IT, IN_PROGRESS, AWAITING_REVIEW, DONE } = COLUMN_NAMES
+
+	const moveCardHandler = (dragIndex, hoverIndex) => {
+		const dragItem = items[dragIndex]
+		if (dragItem) {
+			setItems(prevState => {
+				const coppiedStateArray = [...prevState]
+
+				const prevItem = coppiedStateArray.splice(hoverIndex, 1, dragItem)
+
+				coppiedStateArray.splice(dragIndex, 1, prevItem[0])
+				
+				return coppiedStateArray
+			})
+		}
+	}
+
+	const returnItemsForColumn = (columnName) => {
+		return items
+			.filter(item => item.column === columnName)
+			.map((item, index) => (
+				<MovableItem 
+					key={item.id}
+					name={item.name}
+					setItems={setItems}
+					index={index}
+					currentColumnName={item.column}
+					moveCardHandler={moveCardHandler}
+				/>))
+	}
+
+	return (
+		<div className="container">
+			<DndProvider backend={isMobile ? TouchBackend : HTML5Backend}>
+				<Column title={DO_IT} className='column do-it-column'>
+					{returnItemsForColumn(DO_IT)}
+				</Column>
+				<Column title={IN_PROGRESS} className='column in-progress-column'>
+					{returnItemsForColumn(IN_PROGRESS)}
+				</Column>
+				<Column title={AWAITING_REVIEW} className='column awaiting-review-column'>
+					{returnItemsForColumn(AWAITING_REVIEW)}
+				</Column>
+				<Column title={DONE} className='column done-column'>
+					{returnItemsForColumn(DONE)}
+				</Column>
+			</DndProvider>
+		</div>
+	)
+}
